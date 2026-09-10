@@ -44,15 +44,25 @@
     };
 
     function App() {
-      // Инициализируем состояние из LocalStorage или берем дефолтное
+      // ИСХОДНАЯ ОШИБКА 1: Блокировка LocalStorage ломала всё приложение. 
+      // ДОБАВЛЕНО: Безопасный блок try...catch
       const [config, setConfig] = useState(() => {
-        const saved = localStorage.getItem('bot_editor_config');
-        return saved ? JSON.parse(saved) : defaultConfig;
+        try {
+          const saved = localStorage.getItem('bot_editor_config');
+          return saved ? JSON.parse(saved) : defaultConfig;
+        } catch (error) {
+          console.warn("Локальное хранилище недоступно. Загружены настройки по умолчанию.");
+          return defaultConfig;
+        }
       });
 
-      // Сохраняем в LocalStorage при каждом изменении
+      // ДОБАВЛЕНО: Безопасное сохранение в LocalStorage
       useEffect(() => {
-        localStorage.setItem('bot_editor_config', JSON.stringify(config));
+        try {
+          localStorage.setItem('bot_editor_config', JSON.stringify(config));
+        } catch (error) {
+          console.warn("Не удалось сохранить данные в локальное хранилище.");
+        }
       }, [config]);
 
       const [activeTab, setActiveTab] = useState('profile');
@@ -67,14 +77,17 @@
 
       // --- ЭКСПОРТ ---
       const handleExportHTML = () => {
-        // Формируем автономный файл. Заметьте, мы разбиваем </script>, чтобы браузер не сломался.
+        // ИСХОДНАЯ ОШИБКА 2: Использование <\/script> внутри строки ломало парсер браузера.
+        // ДОБАВЛЕНО: Изоляция закрывающего тега скрипта.
+        const scriptEnd = '</' + 'script>';
+        
         const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${config.profile.name}</title>
-  <script src="https://cdn.tailwindcss.com"><\/script>
+  <script src="https://cdn.tailwindcss.com">${scriptEnd}
   <style>
     body { font-family: ${config.design.fontFamily}; background-color: ${config.design.bgColor}; }
     .bot-header { background-color: ${config.design.primaryColor}; }
@@ -117,7 +130,7 @@
         box.scrollTop = box.scrollHeight;
       }, 1000);
     }
-  <\/script>
+  ${scriptEnd}
 </body>
 </html>`;
 
