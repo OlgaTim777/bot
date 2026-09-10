@@ -22,8 +22,19 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    // --- БАЗОВЫЕ НАСТРОЙКИ И АВТОСОХРАНЕНИЕ ---
+    const cefrDefaults = {
+      A1: { lex: 'Daily Life', gram: 'Present Simple' },
+      A2: { lex: 'Hobbies', gram: 'Past Tenses' },
+      B1: { lex: 'Travel', gram: 'Future Tenses' },
+      B2: { lex: 'Technology', gram: 'Conditionals and Passive Voice' },
+      C1: { lex: 'Environment', gram: 'Modal Verbs and Relative Clauses' },
+      C2: { lex: 'Culture', gram: 'Reported Speech and Advanced Structures' }
+    };
+
     const defaultConfig = {
+      api: {
+        openAiKey: '' 
+      },
       profile: {
         name: 'Grammar Guardian',
         description: 'Интерактивный экзаменатор',
@@ -32,42 +43,80 @@
       },
       language: {
         level: 'B2',
-        topics: 'Education, Technology, Ecology',
+        topics: 'Education, Technology, Ecology', 
+        lexicalTopic: '', 
+        grammarTopic: '', 
+        customDictionary: '', 
+        discussionText: '', 
         style: 'formal'
       },
       design: {
-        primaryColor: '#8b5cf6', // Мягкий фиолетовый/пастельный
+        primaryColor: '#8b5cf6', 
         bgColor: '#f8fafc',
         fontFamily: 'sans-serif',
         typingSpeed: 30
       }
     };
 
+    const buildSystemPrompt = (config) => {
+      const lex = config.language.lexicalTopic || cefrDefaults[config.language.level].lex;
+      const gram = config.language.grammarTopic || cefrDefaults[config.language.level].gram;
+      
+      let prompt = `You are a friendly, conversational English tutor and native speaker interacting with a student.
+Role & Persona: ${config.profile.persona}
+Target Student Age: ${config.profile.age}
+Target CEFR Level: ${config.language.level}
+Lexical Topic: ${lex}
+Grammar Focus: ${gram}
+Style: ${config.language.style}
+
+Instructions:
+1. Actively listen and react to the student naturally (use markers like "That's interesting!", "I see what you mean", "Could you elaborate?").
+2. Always maintain the flow by asking logical follow-up questions. Never end your turn without inviting the student to continue.
+3. Softly and politely correct major errors in a conversational way without breaking the flow (e.g., "Oh, you mean you *went* there yesterday?").
+4. Keep your vocabulary and grammar strictly appropriate for the ${config.language.level} level.
+5. Keep your responses relatively short, fitting a mobile chat interface.`;
+
+      if (config.language.customDictionary && config.language.customDictionary.trim() !== '') {
+        const words = config.language.customDictionary.split('\n').filter(w => w.trim()).join(', ');
+        prompt += `\n6. Try to naturally use or elicit these specific words/phrases: ${words}.`;
+      }
+      if (config.language.discussionText && config.language.discussionText.trim() !== '') {
+        prompt += `\n7. Base your discussion on the following text: "${config.language.discussionText}". Alternate between Yes/No, Wh-, Alternative (or), and Tag questions to test comprehension.`;
+      }
+
+      return prompt;
+    };
+
     function App() {
-      // ИСХОДНАЯ ОШИБКА 1: Блокировка LocalStorage ломала всё приложение. 
-      // ДОБАВЛЕНО: Безопасный блок try...catch
       const [config, setConfig] = useState(() => {
         try {
           const saved = localStorage.getItem('bot_editor_config');
-          return saved ? JSON.parse(saved) : defaultConfig;
+          if (saved) {
+             const parsed = JSON.parse(saved);
+             return { 
+               ...defaultConfig, 
+               ...parsed, 
+               api: { ...defaultConfig.api, ...(parsed.api || {}) },
+               language: { ...defaultConfig.language, ...(parsed.language || {}) },
+               profile: { ...defaultConfig.profile, ...(parsed.profile || {}) },
+               design: { ...defaultConfig.design, ...(parsed.design || {}) }
+             };
+          }
+          return defaultConfig;
         } catch (error) {
-          console.warn("Локальное хранилище недоступно. Загружены настройки по умолчанию.");
           return defaultConfig;
         }
       });
 
-      // ДОБАВЛЕНО: Безопасное сохранение в LocalStorage
       useEffect(() => {
         try {
           localStorage.setItem('bot_editor_config', JSON.stringify(config));
-        } catch (error) {
-          console.warn("Не удалось сохранить данные в локальное хранилище.");
-        }
+        } catch (error) {}
       }, [config]);
 
       const [activeTab, setActiveTab] = useState('profile');
 
-      // Функции обновления отдельных модулей
       const updateConfig = (module, key, value) => {
         setConfig(prev => ({
           ...prev,
@@ -75,11 +124,13 @@
         }));
       };
 
-      // --- ЭКСПОРТ ---
+      const effectiveLexExp = config.language.lexicalTopic || cefrDefaults[config.language.level].lex;
+      const effectiveGramExp = config.language.grammarTopic || cefrDefaults[config.language.level].gram;
+
       const handleExportHTML = () => {
-        // ИСХОДНАЯ ОШИБКА 2: Использование <\/script> внутри строки ломало парсер браузера.
-        // ДОБАВЛЕНО: Изоляция закрывающего тега скрипта.
         const scriptEnd = '</' + 'script>';
+        const sysPromptStr = JSON.stringify(buildSystemPrompt(config)).replace(/</g, '\\u003c');
+        const apiKeyStr = JSON.stringify(config.api.openAiKey || "");
         
         const htmlContent = `<!DOCTYPE html>
 <html lang="en">
@@ -88,9 +139,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${config.profile.name}</title>
   <script src="https://cdn.tailwindcss.com">${scriptEnd}
+  <script src="https://unpkg.com/compromise">${scriptEnd}
   <style>
     body { font-family: ${config.design.fontFamily}; background-color: ${config.design.bgColor}; }
     .bot-header { background-color: ${config.design.primaryColor}; }
+    .typing-dot { animation: typing 1.4s infinite ease-in-out both; }
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
   </style>
 </head>
 <body class="flex items-center justify-center h-screen p-4">
@@ -104,31 +160,106 @@
         <p class="text-xs opacity-90">${config.language.level} Level</p>
       </div>
     </div>
-    <div class="flex-1 p-4 overflow-y-auto" id="chat-box">
-      <div class="bg-gray-100 text-gray-800 p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[85%] mb-3">
-        Hello! Let's talk about ${config.language.topics}.
+    <div class="flex-1 p-4 overflow-y-auto flex flex-col gap-4" id="chat-box">
+      <div class="bg-gray-100 text-gray-800 p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[85%] self-start">
+        Hello! We are going to practice ${effectiveLexExp} and ${effectiveGramExp}. Type "finish" to get your results. Let's begin!
       </div>
     </div>
     <div class="p-4 border-t flex gap-2">
-      <input type="text" id="user-input" class="flex-1 border rounded-full px-4 py-2" placeholder="Type here...">
-      <button onclick="sendMessage()" class="text-white px-4 py-2 rounded-full" style="background-color: ${config.design.primaryColor}">Send</button>
+      <input type="text" id="user-input" class="flex-1 border rounded-full px-4 py-2 focus:outline-none" placeholder="Type here..." onkeypress="if(event.key === 'Enter') sendMessage()">
+      <button onclick="sendMessage()" class="text-white px-4 py-2 rounded-full font-medium" style="background-color: ${config.design.primaryColor}">➔</button>
     </div>
   </div>
   <script>
-    // Простая логика чата для экспортированного файла
-    function sendMessage() {
-      const input = document.getElementById('user-input');
-      const text = input.value;
+    const systemPrompt = ${sysPromptStr};
+    const apiKey = ${apiKeyStr};
+    let messageHistory = [{ role: "system", content: systemPrompt }];
+    const chatBox = document.getElementById('chat-box');
+    const input = document.getElementById('user-input');
+
+    function analyzeText(texts) {
+        const fullText = texts.join(' ');
+        const doc = window.nlp(fullText);
+        const wordCount = doc.terms().length;
+        const verbs = doc.verbs().length;
+        const adjectives = doc.adjectives().length;
+
+        let commScore = wordCount > 20 ? 3 : (wordCount > 10 ? 2 : 1); 
+        let gramScore = verbs > 3 ? 3 : (verbs > 1 ? 2 : 1); 
+        let vocabScore = adjectives > 2 ? 3 : 1; 
+        
+        let total = commScore + gramScore + vocabScore;
+        let cefr = total >= 8 ? '${config.language.level}' : (total >= 5 ? 'B1' : 'A2');
+        let badge = total >= 8 ? 'Brain Champion' : (total >= 5 ? 'Word Hunter' : 'Explorer');
+
+        return 'Assessment Complete! \\n\\nCEFR Estimate: ' + cefr + '\\nWords: ' + wordCount + '\\nScore: ' + total + '/9\\n\\nBadge Unlocked: 🏆 ' + badge;
+    }
+
+    async function sendMessage() {
+      const text = input.value.trim();
       if(!text) return;
       
-      const box = document.getElementById('chat-box');
-      box.innerHTML += '<div class="bg-blue-100 text-blue-900 p-3 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] self-end ml-auto mb-3">' + text + '</div>';
+      appendMessage(text, 'user');
       input.value = '';
+      messageHistory.push({ role: "user", content: text });
       
-      setTimeout(() => {
-        box.innerHTML += '<div class="bg-gray-100 text-gray-800 p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[85%] mb-3">Please tell me more, or type "finish" to get results.</div>';
-        box.scrollTop = box.scrollHeight;
-      }, 1000);
+      if (text.toLowerCase().includes('finish') || text.toLowerCase().includes('завершить')) {
+        const userTexts = messageHistory.filter(m => m.role === 'user').map(m => m.content);
+        appendMessage(analyzeText(userTexts), 'bot');
+        return;
+      }
+
+      showTyping();
+
+      if (apiKey) {
+        try {
+          const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+            body: JSON.stringify({ model: 'llama3-8b-8192', messages: messageHistory, temperature: 0.7 })
+          });
+          const data = await response.json();
+          removeTyping();
+          if(data.choices && data.choices[0]) {
+             const reply = data.choices[0].message.content;
+             messageHistory.push({ role: "assistant", content: reply });
+             appendMessage(reply, 'bot');
+          }
+        } catch(e) {
+          removeTyping();
+          appendMessage("API Connection Error.", 'bot');
+        }
+      } else {
+        setTimeout(() => {
+          removeTyping();
+          appendMessage("Please tell me more, or type 'finish' to get results. (Demo Mode)", 'bot');
+        }, 1000);
+      }
+    }
+
+    function appendMessage(text, sender) {
+      const div = document.createElement('div');
+      div.className = sender === 'user' 
+        ? 'text-white p-3 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] self-end'
+        : 'bg-gray-100 text-gray-800 p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[85%] self-start whitespace-pre-wrap';
+      if(sender === 'user') div.style.backgroundColor = '${config.design.primaryColor}';
+      div.textContent = text;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function showTyping() {
+      const div = document.createElement('div');
+      div.id = 'typing-indicator';
+      div.className = 'bg-gray-100 p-3 rounded-2xl rounded-tl-none self-start w-16 flex gap-1 justify-center items-center h-10 shadow-sm';
+      div.innerHTML = '<div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div><div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div><div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>';
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function removeTyping() {
+      const el = document.getElementById('typing-indicator');
+      if(el) el.remove();
     }
   ${scriptEnd}
 </body>
@@ -151,14 +282,12 @@
       return (
         <div className="flex h-screen text-gray-800">
           
-          {/* ЛЕВАЯ ПАНЕЛЬ: РЕДАКТОР */}
           <aside className="w-1/2 flex flex-col border-r border-gray-200 bg-white">
             <div className="p-6 border-b">
               <h1 className="text-2xl font-bold text-gray-900">Редактор Бота-Экзаменатора</h1>
               <p className="text-gray-500 text-sm mt-1">Настройте параметры и протестируйте в реальном времени</p>
             </div>
             
-            {/* Навигация */}
             <div className="flex border-b px-6 pt-4 gap-4">
               {['profile', 'language', 'design'].map(tab => (
                 <button 
@@ -168,16 +297,28 @@
                     activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  {tab === 'profile' ? 'Профиль' : tab === 'language' ? 'Язык & NLP' : 'Дизайн'}
+                  {tab === 'profile' ? 'Профиль & API' : tab === 'language' ? 'Язык & NLP' : 'Дизайн'}
                 </button>
               ))}
             </div>
 
-            {/* Настройки */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 pb-20">
               
               {activeTab === 'profile' && (
                 <div className="space-y-4 animate-fadeIn">
+                  
+                  <div className="border border-green-200 bg-green-50 p-4 rounded-xl">
+                    <label className="block text-sm font-semibold mb-1 text-green-800">Groq API Key (Бесплатный LLM-режим)</label>
+                    <input 
+                      type="password" 
+                      value={config.api.openAiKey} 
+                      onChange={e => updateConfig('api', 'openAiKey', e.target.value)} 
+                      className="w-full p-2 border border-green-300 rounded-lg focus:ring-2 focus:ring-green-400 outline-none" 
+                      placeholder="gsk_..." 
+                    />
+                    <p className="text-xs text-green-700 mt-2">Вставьте ключ от console.groq.com. Если поле пустое, бот работает в базовом скриптовом демо-режиме.</p>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-semibold mb-1">Имя бота</label>
                     <input type="text" value={config.profile.name} onChange={e => updateConfig('profile', 'name', e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" />
@@ -198,22 +339,83 @@
               )}
 
               {activeTab === 'language' && (
-                <div className="space-y-4 animate-fadeIn">
-                  <div>
-                    <label className="block text-sm font-semibold mb-1">Целевой уровень CEFR</label>
-                    <select value={config.language.level} onChange={e => updateConfig('language', 'level', e.target.value)} className="w-full p-2 border rounded-lg">
-                      {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(lvl => <option key={lvl} value={lvl}>{lvl}</option>)}
-                    </select>
+                <div className="space-y-5 animate-fadeIn">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">Целевой уровень CEFR</label>
+                      <select value={config.language.level} onChange={e => updateConfig('language', 'level', e.target.value)} className="w-full p-2 border rounded-lg bg-blue-50 font-medium">
+                        {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(lvl => <option key={lvl} value={lvl}>{lvl}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">Стиль речи</label>
+                      <div className="flex gap-4 mt-2">
+                        <label className="flex items-center gap-2"><input type="radio" name="style" checked={config.language.style === 'formal'} onChange={() => updateConfig('language', 'style', 'formal')} /> Formal</label>
+                        <label className="flex items-center gap-2"><input type="radio" name="style" checked={config.language.style === 'informal'} onChange={() => updateConfig('language', 'style', 'informal')} /> Informal</label>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-semibold mb-1">Темы для проверки (через запятую)</label>
-                    <input type="text" value={config.language.topics} onChange={e => updateConfig('language', 'topics', e.target.value)} className="w-full p-2 border rounded-lg" />
+
+                  <div className="grid grid-cols-2 gap-4 border-t pt-4">
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">Тема общения</label>
+                      <select value={config.language.lexicalTopic} onChange={e => updateConfig('language', 'lexicalTopic', e.target.value)} className="w-full p-2 border rounded-lg">
+                        <option value="">(Авто: {cefrDefaults[config.language.level].lex})</option>
+                        <option value="Travel">Travel</option>
+                        <option value="Education">Education</option>
+                        <option value="Technology">Technology</option>
+                        <option value="Health">Health</option>
+                        <option value="Environment">Environment</option>
+                        <option value="Hobbies">Hobbies</option>
+                        <option value="Food">Food</option>
+                        <option value="Work">Work</option>
+                        <option value="Culture">Culture</option>
+                        <option value="Daily Life">Daily Life</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">Грамматическая тема</label>
+                      <select value={config.language.grammarTopic} onChange={e => updateConfig('language', 'grammarTopic', e.target.value)} className="w-full p-2 border rounded-lg">
+                        <option value="">(Авто: {cefrDefaults[config.language.level].gram})</option>
+                        <option value="Present Tenses">Present Tenses</option>
+                        <option value="Past Tenses">Past Tenses</option>
+                        <option value="Future Tenses">Future Tenses</option>
+                        <option value="Conditionals">Conditionals</option>
+                        <option value="Passive Voice">Passive Voice</option>
+                        <option value="Reported Speech">Reported Speech</option>
+                        <option value="Modal Verbs">Modal Verbs</option>
+                        <option value="Articles">Articles</option>
+                        <option value="Prepositions">Prepositions</option>
+                        <option value="Relative Clauses">Relative Clauses</option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-semibold mb-1">Стиль речи</label>
-                    <div className="flex gap-4 mt-2">
-                      <label className="flex items-center gap-2"><input type="radio" name="style" checked={config.language.style === 'formal'} onChange={() => updateConfig('language', 'style', 'formal')} /> Formal</label>
-                      <label className="flex items-center gap-2"><input type="radio" name="style" checked={config.language.style === 'informal'} onChange={() => updateConfig('language', 'style', 'informal')} /> Informal</label>
+
+                  <div className="border-t pt-4">
+                    <label className="block text-sm font-semibold mb-1">Пользовательский словарь (по 1 фразе в строке)</label>
+                    <textarea 
+                      value={config.language.customDictionary} 
+                      onChange={e => updateConfig('language', 'customDictionary', e.target.value)} 
+                      className="w-full p-2 border rounded-lg h-24 focus:ring-2 outline-none text-sm font-mono" 
+                      placeholder="to be interested in&#10;climate change&#10;take for granted"
+                    ></textarea>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <label className="block text-sm font-semibold mb-1">Текст для обсуждения</label>
+                    <div className="flex gap-2 items-start">
+                      <textarea 
+                        value={config.language.discussionText} 
+                        onChange={e => updateConfig('language', 'discussionText', e.target.value)} 
+                        className="w-full p-2 border rounded-lg h-24 focus:ring-2 outline-none text-sm" 
+                        placeholder="Вставьте сюда оригинальный текст, по которому бот будет задавать вопросы..."
+                      ></textarea>
+                      <button 
+                        onClick={() => alert("Текст сохранен! Теперь он включен в системный промпт.")}
+                        className="px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-800 font-medium rounded-lg text-sm transition-colors whitespace-nowrap"
+                      >
+                        Загрузить текст
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -242,7 +444,6 @@
               )}
             </div>
 
-            {/* Блок Экспорта */}
             <div className="p-6 border-t bg-gray-50 flex gap-3 flex-wrap">
               <button onClick={handleExportHTML} className="px-5 py-2.5 bg-gray-800 hover:bg-gray-900 text-white rounded-lg font-medium shadow-sm transition-colors flex-1">
                 Скачать HTML
@@ -253,84 +454,149 @@
             </div>
           </aside>
 
-          {/* ПРАВАЯ ПАНЕЛЬ: ПРЕВЬЮ (ИНТЕРАКТИВНОЕ) */}
           <main className="w-1/2 bg-gray-100 flex flex-col items-center justify-center p-8 relative" style={{ backgroundColor: config.design.bgColor }}>
-            
             <div className="w-full max-w-md h-[700px] bg-white rounded-[2rem] shadow-2xl overflow-hidden flex flex-col border-[6px] border-white relative z-10" style={{ fontFamily: config.design.fontFamily }}>
               <ChatPreview config={config} />
             </div>
-
           </main>
         </div>
       );
     }
 
-    // --- КОМПОНЕНТ ПРЕВЬЮ ЧАТА И NLP ---
     function ChatPreview({ config }) {
-      const [messages, setMessages] = useState([
-        { id: 1, sender: 'bot', text: `Hello! I am ${config.profile.name}. We are going to practice topics like: ${config.language.topics}. Type "finish" when you want to get your CEFR score.` }
-      ]);
+      const effectiveLex = config.language.lexicalTopic || cefrDefaults[config.language.level].lex;
+      const effectiveGram = config.language.grammarTopic || cefrDefaults[config.language.level].gram;
+
+      const [messages, setMessages] = useState([]);
       const [inputValue, setInputValue] = useState('');
       const [isTyping, setIsTyping] = useState(false);
+      
+      const [llmHistory, setLlmHistory] = useState([]);
       const messagesEndRef = useRef(null);
 
-      // Авто-скролл вниз
+      useEffect(() => {
+        const sysPrompt = buildSystemPrompt(config);
+        setLlmHistory([{ role: 'system', content: sysPrompt }]);
+        
+        setMessages(prev => {
+          if (prev.length === 0 || (prev.length === 1 && prev[0].sender === 'bot')) {
+            return [{ id: 1, sender: 'bot', text: `Hello! I am ${config.profile.name}. We are going to practice ${effectiveLex} and ${effectiveGram}. Type "finish" when you want to get your CEFR score.` }];
+          }
+          return prev;
+        });
+      }, [config]);
+
       useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, [messages, isTyping]);
 
-      // Движок Оценки (NLP)
       const analyzeText = (userMessages) => {
-        // Объединяем все сообщения юзера
         const fullText = userMessages.join(' ');
-        
-        // Используем compromise.js
         const doc = window.nlp(fullText);
         
         const wordCount = doc.terms().length;
-        const sentences = doc.sentences().length;
         const verbs = doc.verbs().length;
         const adjectives = doc.adjectives().length;
 
-        // Имитация критериев ОГЭ/ЕГЭ
-        let commScore = wordCount > 20 ? 3 : (wordCount > 10 ? 2 : 1); // РКЗ
-        let gramScore = verbs > 3 ? 3 : (verbs > 1 ? 2 : 1); // Грамматика
-        let vocabScore = adjectives > 2 ? 3 : 1; // Лексика
+        let commScore = wordCount > 20 ? 3 : (wordCount > 10 ? 2 : 1); 
+        let gramScore = verbs > 3 ? 3 : (verbs > 1 ? 2 : 1); 
+        let vocabScore = adjectives > 2 ? 3 : 1; 
+
+        let dictFeedback = `\nОбсуждаемая тема: ${effectiveLex}`;
+        if (config.language.customDictionary && config.language.customDictionary.trim() !== '') {
+          const terms = config.language.customDictionary.split('\n').map(t => t.trim()).filter(t => t.length > 0);
+          let usedTerms = [];
+          terms.forEach(term => {
+            if (fullText.toLowerCase().includes(term.toLowerCase())) usedTerms.push(term);
+          });
+          if (usedTerms.length > 0) vocabScore += 1; 
+          dictFeedback = `\nСлова из словаря использованы: ${usedTerms.length}/${terms.length} (${usedTerms.join(', ')})`;
+        }
         
         let total = commScore + gramScore + vocabScore;
-        
         let cefr = total >= 8 ? config.language.level : (total >= 5 ? 'B1' : 'A2');
         let badge = total >= 8 ? 'Brain Champion' : (total >= 5 ? 'Word Hunter' : 'Explorer');
 
-        return `Assessment Complete! \n\nCEFR Estimate: ${cefr}\nWords: ${wordCount}\nScore (OGE/EGE scale): ${total}/9\n\nBadge Unlocked: 🏆 ${badge}!\n\nKeep practicing!`;
+        return `Assessment Complete! \n\nCEFR Estimate: ${cefr}\nWords: ${wordCount}\nScore (OGE/EGE scale): ${total}/9${dictFeedback}\n\nBadge Unlocked: 🏆 ${badge}!\n\nKeep practicing!`;
       };
 
-      const handleSend = () => {
+      const handleSend = async () => {
         if (!inputValue.trim()) return;
         
-        const newUserMsg = { id: Date.now(), sender: 'user', text: inputValue };
-        const updatedMessages = [...messages, newUserMsg];
-        setMessages(updatedMessages);
+        const userText = inputValue;
+        const newUserMsg = { id: Date.now(), sender: 'user', text: userText };
+        
+        setMessages(prev => [...prev, newUserMsg]);
+        setLlmHistory(prev => [...prev, { role: 'user', content: userText }]);
         setInputValue('');
         setIsTyping(true);
 
-        // Имитация задержки печати
-        setTimeout(() => {
-          setIsTyping(false);
-          
-          if (newUserMsg.text.toLowerCase().includes('finish') || newUserMsg.text.toLowerCase().includes('завершить')) {
-            const userTexts = updatedMessages.filter(m => m.sender === 'user').map(m => m.text);
-            const feedback = analyzeText(userTexts);
-            setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: feedback }]);
-          } else {
-            setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: 'Interesting! Tell me more about that.' }]);
-          }
-        }, 1500); // 1.5 секунды думает
+        const isFinish = userText.toLowerCase().includes('finish') || userText.toLowerCase().includes('завершить');
+
+        if (isFinish) {
+           setTimeout(() => {
+             setIsTyping(false);
+             const userTexts = messages.filter(m => m.sender === 'user').map(m => m.text);
+             userTexts.push(userText); 
+             const feedback = analyzeText(userTexts);
+             setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: feedback }]);
+           }, 1000);
+           return;
+        }
+
+        if (config.api.openAiKey) {
+            try {
+                const currentHistory = [...llmHistory, { role: 'user', content: userText }];
+                const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${config.api.openAiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'llama3-8b-8192',
+                        messages: currentHistory,
+                        temperature: 0.7,
+                        max_tokens: 150
+                    })
+                });
+
+                const data = await response.json();
+                setIsTyping(false);
+
+                if (data.choices && data.choices[0]) {
+                    const reply = data.choices[0].message.content;
+                    setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: reply }]);
+                    setLlmHistory(prev => [...prev, { role: 'assistant', content: reply }]);
+                } else {
+                    setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: "Error: Unexpected API response." }]);
+                }
+            } catch (error) {
+                setIsTyping(false);
+                setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: "Connection error. Please check your API key." }]);
+            }
+        } else {
+            setTimeout(() => {
+              setIsTyping(false);
+              let nextReply = 'Interesting! Tell me more about that.';
+              if (config.language.discussionText && config.language.discussionText.trim() !== '') {
+                const doc = window.nlp(config.language.discussionText);
+                const nouns = doc.nouns().out('array');
+                const mainNoun = nouns.length > 0 ? nouns[messages.length % nouns.length] : 'this topic';
+                const qType = messages.length % 4;
+                if (qType === 0) nextReply = `Do you agree with the main ideas about ${mainNoun} in the text?`; 
+                else if (qType === 1) nextReply = `What do you think is the most important aspect of ${mainNoun} mentioned here?`; 
+                else if (qType === 2) nextReply = `Do you think the situation with ${mainNoun} is getting better or worse?`; 
+                else nextReply = `The text highlights some crucial points about ${mainNoun}, doesn't it?`; 
+              }
+              setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: nextReply }]);
+              setLlmHistory(prev => [...prev, { role: 'assistant', content: nextReply }]);
+            }, 1500);
+        }
       };
 
       return (
         <React.Fragment>
-          {/* Шапка чата */}
           <div className="p-4 text-white flex items-center justify-between shadow-sm z-10 transition-colors" style={{ backgroundColor: config.design.primaryColor }}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center font-bold text-lg">
@@ -344,7 +610,6 @@
             <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
           </div>
 
-          {/* Область сообщений */}
           <div className="flex-1 p-4 bg-gray-50 flex flex-col gap-4 overflow-y-auto">
             {messages.map(msg => (
               <div key={msg.id} className={`max-w-[85%] p-3 rounded-2xl shadow-sm whitespace-pre-wrap ${
@@ -358,15 +623,14 @@
             
             {isTyping && (
               <div className="bg-white text-gray-400 p-3 rounded-2xl rounded-tl-none self-start border border-gray-100 w-16 flex gap-1 justify-center items-center h-10 shadow-sm">
-                <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Ввод */}
           <div className="p-4 bg-white border-t flex gap-2">
             <input 
               type="text" 
@@ -388,7 +652,6 @@
       );
     }
 
-    // Запуск приложения
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
