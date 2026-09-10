@@ -22,6 +22,7 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
+    // --- МАППИНГ ПО УМОЛЧАНИЮ ДЛЯ CEFR ---
     const cefrDefaults = {
       A1: { lex: 'Daily Life', gram: 'Present Simple' },
       A2: { lex: 'Hobbies', gram: 'Past Tenses' },
@@ -31,6 +32,7 @@
       C2: { lex: 'Culture', gram: 'Reported Speech and Advanced Structures' }
     };
 
+    // --- БАЗОВЫЕ НАСТРОЙКИ И АВТОСОХРАНЕНИЕ ---
     const defaultConfig = {
       api: {
         openAiKey: '' 
@@ -58,6 +60,7 @@
       }
     };
 
+    // --- ГЕНЕРАТОР СИСТЕМНОГО ПРОМПТА (ИЗМЕНЕНО: Добавлена реакция на короткие ответы) ---
     const buildSystemPrompt = (config) => {
       const lex = config.language.lexicalTopic || cefrDefaults[config.language.level].lex;
       const gram = config.language.grammarTopic || cefrDefaults[config.language.level].gram;
@@ -72,20 +75,43 @@ Style: ${config.language.style}
 
 Instructions:
 1. Actively listen and react to the student naturally (use markers like "That's interesting!", "I see what you mean", "Could you elaborate?").
-2. Always maintain the flow by asking logical follow-up questions. Never end your turn without inviting the student to continue.
-3. Softly and politely correct major errors in a conversational way without breaking the flow (e.g., "Oh, you mean you *went* there yesterday?").
-4. Keep your vocabulary and grammar strictly appropriate for the ${config.language.level} level.
-5. Keep your responses relatively short, fitting a mobile chat interface.`;
+2. CRITICAL: If the student gives a short, one-word, or incomplete answer, DO NOT get stuck. Use their short answer as a springboard: acknowledge it, show interest, and immediately ask a specific guiding/follow-up question that pushes them to expand their answer, use the target topic (${lex}), and apply the target grammar (${gram}). Step-by-step, gently guide the dialogue deeper into the topic.
+3. Always maintain the flow. Never end your turn without inviting the student to continue.
+4. Softly and politely correct major errors in a conversational way without breaking the flow.
+5. Keep your vocabulary and grammar strictly appropriate for the ${config.language.level} level.
+6. Keep your responses relatively short, fitting a mobile chat interface.`;
 
       if (config.language.customDictionary && config.language.customDictionary.trim() !== '') {
         const words = config.language.customDictionary.split('\n').filter(w => w.trim()).join(', ');
-        prompt += `\n6. Try to naturally use or elicit these specific words/phrases: ${words}.`;
+        prompt += `\n7. Try to naturally use or elicit these specific words/phrases: ${words}.`;
       }
       if (config.language.discussionText && config.language.discussionText.trim() !== '') {
-        prompt += `\n7. Base your discussion on the following text: "${config.language.discussionText}". Alternate between Yes/No, Wh-, Alternative (or), and Tag questions to test comprehension.`;
+        prompt += `\n8. Base your discussion on the following text: "${config.language.discussionText}". Alternate between Yes/No, Wh-, Alternative (or), and Tag questions to test comprehension.`;
       }
 
       return prompt;
+    };
+
+    // --- ФУНКЦИЯ РАСЧЕТА МЕТРИК ВРЕМЕНИ (НОВОЕ) ---
+    const calculateMetrics = (msgs) => {
+        if (msgs.length < 2) return { totalTime: "00:00", avgUserTime: 0 };
+        const totalMs = msgs[msgs.length - 1].timestamp - msgs[0].timestamp;
+        const totalMins = Math.floor(totalMs / 60000);
+        const totalSecs = Math.floor((totalMs % 60000) / 1000);
+        const totalTimeStr = `${totalMins}:${totalSecs.toString().padStart(2, '0')}`;
+
+        let userResponseTimes = [];
+        for (let i = 0; i < msgs.length - 1; i++) {
+            if (msgs[i].sender === 'bot' && msgs[i+1].sender === 'user') {
+                userResponseTimes.push(msgs[i+1].timestamp - msgs[i].timestamp);
+            }
+        }
+        const avgMs = userResponseTimes.length > 0 
+            ? userResponseTimes.reduce((a,b)=>a+b,0) / userResponseTimes.length 
+            : 0;
+        const avgUserTimeStr = Math.round(avgMs / 1000);
+
+        return { totalTime: totalTimeStr, avgUserTime: avgUserTimeStr };
     };
 
     function App() {
@@ -105,6 +131,7 @@ Instructions:
           }
           return defaultConfig;
         } catch (error) {
+          console.warn("Локальное хранилище недоступно. Загружены настройки по умолчанию.");
           return defaultConfig;
         }
       });
@@ -127,6 +154,7 @@ Instructions:
       const effectiveLexExp = config.language.lexicalTopic || cefrDefaults[config.language.level].lex;
       const effectiveGramExp = config.language.grammarTopic || cefrDefaults[config.language.level].gram;
 
+      // --- ЭКСПОРТ (ИЗМЕНЕНО: Добавлены метрики и финальный фидбек от LLM) ---
       const handleExportHTML = () => {
         const scriptEnd = '</' + 'script>';
         const sysPromptStr = JSON.stringify(buildSystemPrompt(config)).replace(/</g, '\\u003c');
@@ -173,11 +201,32 @@ Instructions:
   <script>
     const systemPrompt = ${sysPromptStr};
     const apiKey = ${apiKeyStr};
+    const dictionary = \`${config.language.customDictionary || ''}\`;
+    const discText = \`${config.language.discussionText || ''}\`;
+    
     let messageHistory = [{ role: "system", content: systemPrompt }];
+    let chatMessages = [{ sender: 'bot', text: 'Hello...', timestamp: Date.now() }];
+    
     const chatBox = document.getElementById('chat-box');
     const input = document.getElementById('user-input');
 
-    function analyzeText(texts) {
+    function calculateMetrics(msgs) {
+        if (msgs.length < 2) return { totalTime: "00:00", avgUserTime: 0 };
+        const totalMs = msgs[msgs.length - 1].timestamp - msgs[0].timestamp;
+        const m = Math.floor(totalMs / 60000);
+        const s = Math.floor((totalMs % 60000) / 1000);
+        
+        let rTimes = [];
+        for (let i = 0; i < msgs.length - 1; i++) {
+            if (msgs[i].sender === 'bot' && msgs[i+1].sender === 'user') {
+                rTimes.push(msgs[i+1].timestamp - msgs[i].timestamp);
+            }
+        }
+        const avgSec = rTimes.length ? Math.round((rTimes.reduce((a,b)=>a+b,0)/rTimes.length)/1000) : 0;
+        return { totalTime: m + ':' + (s < 10 ? '0'+s : s), avgUserTime: avgSec };
+    }
+
+    function analyzeTextFallback(texts, metrics) {
         const fullText = texts.join(' ');
         const doc = window.nlp(fullText);
         const wordCount = doc.terms().length;
@@ -188,24 +237,70 @@ Instructions:
         let gramScore = verbs > 3 ? 3 : (verbs > 1 ? 2 : 1); 
         let vocabScore = adjectives > 2 ? 3 : 1; 
         
+        let dictFeedback = '\\nОбсуждаемая тема: ${effectiveLexExp}';
+        if (dictionary.trim() !== '') {
+          const terms = dictionary.split('\\n').map(t => t.trim()).filter(t => t.length > 0);
+          let usedTerms = [];
+          terms.forEach(term => {
+            if (fullText.toLowerCase().includes(term.toLowerCase())) usedTerms.push(term);
+          });
+          if (usedTerms.length > 0) vocabScore += 1; 
+          dictFeedback = '\\nСлова из словаря использованы: ' + usedTerms.length + '/' + terms.length + ' (' + usedTerms.join(', ') + ')';
+        }
+        
         let total = commScore + gramScore + vocabScore;
         let cefr = total >= 8 ? '${config.language.level}' : (total >= 5 ? 'B1' : 'A2');
         let badge = total >= 8 ? 'Brain Champion' : (total >= 5 ? 'Word Hunter' : 'Explorer');
 
-        return 'Assessment Complete! \\n\\nCEFR Estimate: ' + cefr + '\\nWords: ' + wordCount + '\\nScore: ' + total + '/9\\n\\nBadge Unlocked: 🏆 ' + badge;
+        return '⏱ Общее время: ' + metrics.totalTime + '\\n⏳ Среднее время ответа: ' + metrics.avgUserTime + ' сек.\\n\\nAssessment Complete! \\n\\nCEFR Estimate: ' + cefr + '\\nWords: ' + wordCount + '\\nScore: ' + total + '/9' + dictFeedback + '\\n\\nBadge Unlocked: 🏆 ' + badge;
     }
 
     async function sendMessage() {
       const text = input.value.trim();
       if(!text) return;
       
+      chatMessages.push({ sender: 'user', text: text, timestamp: Date.now() });
       appendMessage(text, 'user');
       input.value = '';
       messageHistory.push({ role: "user", content: text });
       
       if (text.toLowerCase().includes('finish') || text.toLowerCase().includes('завершить')) {
-        const userTexts = messageHistory.filter(m => m.role === 'user').map(m => m.content);
-        appendMessage(analyzeText(userTexts), 'bot');
+        showTyping();
+        const metrics = calculateMetrics(chatMessages);
+        
+        if (apiKey) {
+           const feedbackPrompt = \`The conversation is over. Generate a final structured feedback in Russian.
+Strictly evaluate the student's usage of:
+- CEFR Level: ${config.language.level}
+- Lexical topic: ${effectiveLexExp}
+- Grammar topic: ${effectiveGramExp}
+Include:
+1. Краткий анализ диалога (о чем говорили, как развивалась мысль).
+2. Компактная оценка лексики и грамматики (строго по заданным темам: что использовано отлично, а что забыли применить).
+Do not include timestamps, I will add them. End with a short motivational slogan.\`;
+
+           try {
+             const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+               body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages: [...messageHistory, { role: 'system', content: feedbackPrompt }], temperature: 0.7 })
+             });
+             const data = await response.json();
+             removeTyping();
+             if(data.choices && data.choices[0]) {
+                const reply = data.choices[0].message.content;
+                appendMessage("⏱ Общее время: " + metrics.totalTime + "\\n⏳ Среднее время ответа: " + metrics.avgUserTime + " сек.\\n\\n" + reply, 'bot');
+             } else {
+                appendMessage(analyzeTextFallback(chatMessages.filter(m=>m.sender==='user').map(m=>m.text), metrics), 'bot');
+             }
+           } catch (e) {
+             removeTyping();
+             appendMessage(analyzeTextFallback(chatMessages.filter(m=>m.sender==='user').map(m=>m.text), metrics), 'bot');
+           }
+        } else {
+           removeTyping();
+           appendMessage(analyzeTextFallback(chatMessages.filter(m=>m.sender==='user').map(m=>m.text), metrics), 'bot');
+        }
         return;
       }
 
@@ -216,24 +311,43 @@ Instructions:
           const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-            body: JSON.stringify({ model: 'llama3-8b-8192', messages: messageHistory, temperature: 0.7 })
+            body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages: messageHistory, temperature: 0.7 })
           });
           const data = await response.json();
           removeTyping();
           if(data.choices && data.choices[0]) {
              const reply = data.choices[0].message.content;
              messageHistory.push({ role: "assistant", content: reply });
+             chatMessages.push({ sender: 'bot', text: reply, timestamp: Date.now() });
              appendMessage(reply, 'bot');
+          } else if (data.error && data.error.message) {
+             appendMessage("Groq Error: " + data.error.message, 'bot');
+          } else {
+             appendMessage("Error: Unexpected API response.", 'bot');
           }
         } catch(e) {
           removeTyping();
-          appendMessage("API Connection Error.", 'bot');
+          appendMessage("Connection error. Please check your internet or API key.", 'bot');
         }
       } else {
         setTimeout(() => {
           removeTyping();
-          appendMessage("Please tell me more, or type 'finish' to get results. (Demo Mode)", 'bot');
-        }, 1000);
+          let nextReply = 'Interesting! Tell me more about that.';
+          if (discText.trim() !== '') {
+            const doc = window.nlp(discText);
+            const nouns = doc.nouns().out('array');
+            const userMsgCount = messageHistory.filter(m => m.role === 'user').length;
+            const mainNoun = nouns.length > 0 ? nouns[userMsgCount % nouns.length] : 'this topic';
+            const qType = userMsgCount % 4;
+            if (qType === 0) nextReply = 'Do you agree with the main ideas about ' + mainNoun + ' in the text?'; 
+            else if (qType === 1) nextReply = 'What do you think is the most important aspect of ' + mainNoun + ' mentioned here?'; 
+            else if (qType === 2) nextReply = 'Do you think the situation with ' + mainNoun + ' is getting better or worse?'; 
+            else nextReply = 'The text highlights some crucial points about ' + mainNoun + ', doesn\\'t it?'; 
+          }
+          messageHistory.push({ role: "assistant", content: nextReply });
+          chatMessages.push({ sender: 'bot', text: nextReply, timestamp: Date.now() });
+          appendMessage(nextReply + ' (Demo Mode)', 'bot');
+        }, 1500);
       }
     }
 
@@ -281,7 +395,6 @@ Instructions:
 
       return (
         <div className="flex h-screen text-gray-800">
-          
           <aside className="w-1/2 flex flex-col border-r border-gray-200 bg-white">
             <div className="p-6 border-b">
               <h1 className="text-2xl font-bold text-gray-900">Редактор Бота-Экзаменатора</h1>
@@ -303,10 +416,8 @@ Instructions:
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6 pb-20">
-              
               {activeTab === 'profile' && (
                 <div className="space-y-4 animate-fadeIn">
-                  
                   <div className="border border-green-200 bg-green-50 p-4 rounded-xl">
                     <label className="block text-sm font-semibold mb-1 text-green-800">Groq API Key (Бесплатный LLM-режим)</label>
                     <input 
@@ -463,6 +574,7 @@ Instructions:
       );
     }
 
+    // --- КОМПОНЕНТ ПРЕВЬЮ ЧАТА ---
     function ChatPreview({ config }) {
       const effectiveLex = config.language.lexicalTopic || cefrDefaults[config.language.level].lex;
       const effectiveGram = config.language.grammarTopic || cefrDefaults[config.language.level].gram;
@@ -480,17 +592,19 @@ Instructions:
         
         setMessages(prev => {
           if (prev.length === 0 || (prev.length === 1 && prev[0].sender === 'bot')) {
-            return [{ id: 1, sender: 'bot', text: `Hello! I am ${config.profile.name}. We are going to practice ${effectiveLex} and ${effectiveGram}. Type "finish" when you want to get your CEFR score.` }];
+            // ИЗМЕНЕНО: Добавлен timestamp
+            return [{ id: 1, sender: 'bot', text: `Hello! I am ${config.profile.name}. We are going to practice ${effectiveLex} and ${effectiveGram}. Type "finish" when you want to get your CEFR score.`, timestamp: Date.now() }];
           }
           return prev;
         });
-      }, [config]);
+      }, [config, effectiveLex, effectiveGram]);
 
       useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, [messages, isTyping]);
 
-      const analyzeText = (userMessages) => {
+      // --- ФОЛБЭК ОЦЕНКА (ДЕМО-РЕЖИМ) ---
+      const analyzeTextFallback = (userMessages, metrics) => {
         const fullText = userMessages.join(' ');
         const doc = window.nlp(fullText);
         
@@ -517,33 +631,82 @@ Instructions:
         let cefr = total >= 8 ? config.language.level : (total >= 5 ? 'B1' : 'A2');
         let badge = total >= 8 ? 'Brain Champion' : (total >= 5 ? 'Word Hunter' : 'Explorer');
 
-        return `Assessment Complete! \n\nCEFR Estimate: ${cefr}\nWords: ${wordCount}\nScore (OGE/EGE scale): ${total}/9${dictFeedback}\n\nBadge Unlocked: 🏆 ${badge}!\n\nKeep practicing!`;
+        return `⏱ Общее время: ${metrics.totalTime}\n⏳ Среднее время ответа: ${metrics.avgUserTime} сек.\n\nAssessment Complete! \n\nCEFR Estimate: ${cefr}\nWords: ${wordCount}\nScore (OGE/EGE scale): ${total}/9${dictFeedback}\n\nBadge Unlocked: 🏆 ${badge}!\n\nKeep practicing!`;
       };
 
       const handleSend = async () => {
         if (!inputValue.trim()) return;
         
         const userText = inputValue;
-        const newUserMsg = { id: Date.now(), sender: 'user', text: userText };
+        // ИЗМЕНЕНО: Добавлен timestamp
+        const newUserMsg = { id: Date.now(), sender: 'user', text: userText, timestamp: Date.now() };
         
-        setMessages(prev => [...prev, newUserMsg]);
+        const currentMessages = [...messages, newUserMsg];
+        setMessages(currentMessages);
         setLlmHistory(prev => [...prev, { role: 'user', content: userText }]);
         setInputValue('');
         setIsTyping(true);
 
         const isFinish = userText.toLowerCase().includes('finish') || userText.toLowerCase().includes('завершить');
 
+        // --- ИЗМЕНЕНО: ЛОГИКА ФИНАЛЬНОГО ФИДБЕКА ---
         if (isFinish) {
-           setTimeout(() => {
-             setIsTyping(false);
-             const userTexts = messages.filter(m => m.sender === 'user').map(m => m.text);
-             userTexts.push(userText); 
-             const feedback = analyzeText(userTexts);
-             setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: feedback }]);
-           }, 1000);
+           const metrics = calculateMetrics(currentMessages);
+           
+           if (config.api.openAiKey) {
+               const feedbackPrompt = `The conversation is over. Generate a final structured feedback in Russian.
+Strictly evaluate the student's usage of:
+- CEFR Level: ${config.language.level}
+- Lexical topic: ${effectiveLex}
+- Grammar topic: ${effectiveGram}
+Include:
+1. Краткий анализ диалога (о чем говорили, как развивалась мысль).
+2. Компактная оценка лексики и грамматики (строго по заданным темам: что использовано отлично, а что забыли применить).
+Do not include timestamps, I will add them. End with a short motivational slogan.`;
+
+               try {
+                   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                       method: 'POST',
+                       headers: {
+                           'Content-Type': 'application/json',
+                           'Authorization': `Bearer ${config.api.openAiKey}`
+                       },
+                       body: JSON.stringify({
+                           model: 'llama-3.1-8b-instant',
+                           messages: [...llmHistory, { role: 'user', content: userText }, { role: 'system', content: feedbackPrompt }],
+                           temperature: 0.7,
+                           max_tokens: 500
+                       })
+                   });
+
+                   const data = await response.json();
+                   setIsTyping(false);
+
+                   if (data.choices && data.choices[0]) {
+                       const reply = data.choices[0].message.content;
+                       const finalFeedback = `⏱ Общее время: ${metrics.totalTime}\n⏳ Среднее время ответа: ${metrics.avgUserTime} сек.\n\n${reply}`;
+                       setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: finalFeedback, timestamp: Date.now() }]);
+                   } else {
+                       const userTexts = currentMessages.filter(m => m.sender === 'user').map(m => m.text);
+                       setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: analyzeTextFallback(userTexts, metrics), timestamp: Date.now() }]);
+                   }
+               } catch (error) {
+                   setIsTyping(false);
+                   const userTexts = currentMessages.filter(m => m.sender === 'user').map(m => m.text);
+                   setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: analyzeTextFallback(userTexts, metrics), timestamp: Date.now() }]);
+               }
+           } else {
+               // Фолбэк без ключа
+               setTimeout(() => {
+                 setIsTyping(false);
+                 const userTexts = currentMessages.filter(m => m.sender === 'user').map(m => m.text);
+                 setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: analyzeTextFallback(userTexts, metrics), timestamp: Date.now() }]);
+               }, 1000);
+           }
            return;
         }
 
+        // --- ЛОГИКА ОБЫЧНОГО ЧАТА ---
         if (config.api.openAiKey) {
             try {
                 const currentHistory = [...llmHistory, { role: 'user', content: userText }];
@@ -554,7 +717,7 @@ Instructions:
                         'Authorization': `Bearer ${config.api.openAiKey}`
                     },
                     body: JSON.stringify({
-                        model: 'llama3-8b-8192',
+                        model: 'llama-3.1-8b-instant',
                         messages: currentHistory,
                         temperature: 0.7,
                         max_tokens: 150
@@ -566,14 +729,17 @@ Instructions:
 
                 if (data.choices && data.choices[0]) {
                     const reply = data.choices[0].message.content;
-                    setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: reply }]);
+                    // ИЗМЕНЕНО: Добавлен timestamp
+                    setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: reply, timestamp: Date.now() }]);
                     setLlmHistory(prev => [...prev, { role: 'assistant', content: reply }]);
+                } else if (data.error && data.error.message) {
+                    setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: `Groq Error: ${data.error.message}`, timestamp: Date.now() }]);
                 } else {
-                    setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: "Error: Unexpected API response." }]);
+                    setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: "Error: Unexpected API response.", timestamp: Date.now() }]);
                 }
             } catch (error) {
                 setIsTyping(false);
-                setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: "Connection error. Please check your API key." }]);
+                setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: "Connection error. Check your network or API key.", timestamp: Date.now() }]);
             }
         } else {
             setTimeout(() => {
@@ -589,7 +755,8 @@ Instructions:
                 else if (qType === 2) nextReply = `Do you think the situation with ${mainNoun} is getting better or worse?`; 
                 else nextReply = `The text highlights some crucial points about ${mainNoun}, doesn't it?`; 
               }
-              setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: nextReply }]);
+              // ИЗМЕНЕНО: Добавлен timestamp
+              setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: nextReply, timestamp: Date.now() }]);
               setLlmHistory(prev => [...prev, { role: 'assistant', content: nextReply }]);
             }, 1500);
         }
