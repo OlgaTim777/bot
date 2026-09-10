@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EdTech Lexical Bot Editor</title>
+  
+  <!-- Tailwind CSS для стилей -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React для интерфейса -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Compromise.js для NLP анализа текста -->
+  <script src="https://unpkg.com/compromise"></script>
+</head>
+<body class="m-0 p-0 h-screen overflow-hidden bg-gray-50 font-sans">
+  <div id="root" class="h-full"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // --- БАЗОВЫЕ НАСТРОЙКИ И АВТОСОХРАНЕНИЕ ---
+    const defaultConfig = {
+      profile: {
+        name: 'Grammar Guardian',
+        description: 'Интерактивный экзаменатор',
+        persona: 'Ты строгий, но справедливый учитель. Отвечай кратко.',
+        age: 'teens'
+      },
+      language: {
+        level: 'B2',
+        topics: 'Education, Technology, Ecology',
+        style: 'formal'
+      },
+      design: {
+        primaryColor: '#8b5cf6', // Мягкий фиолетовый/пастельный
+        bgColor: '#f8fafc',
+        fontFamily: 'sans-serif',
+        typingSpeed: 30
+      }
+    };
+
+    function App() {
+      // Инициализируем состояние из LocalStorage или берем дефолтное
+      const [config, setConfig] = useState(() => {
+        const saved = localStorage.getItem('bot_editor_config');
+        return saved ? JSON.parse(saved) : defaultConfig;
+      });
+
+      // Сохраняем в LocalStorage при каждом изменении
+      useEffect(() => {
+        localStorage.setItem('bot_editor_config', JSON.stringify(config));
+      }, [config]);
+
+      const [activeTab, setActiveTab] = useState('profile');
+
+      // Функции обновления отдельных модулей
+      const updateConfig = (module, key, value) => {
+        setConfig(prev => ({
+          ...prev,
+          [module]: { ...prev[module], [key]: value }
+        }));
+      };
+
+      // --- ЭКСПОРТ ---
+      const handleExportHTML = () => {
+        // Формируем автономный файл. Заметьте, мы разбиваем </script>, чтобы браузер не сломался.
+        const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${config.profile.name}</title>
+  <script src="https://cdn.tailwindcss.com"><\/script>
+  <style>
+    body { font-family: ${config.design.fontFamily}; background-color: ${config.design.bgColor}; }
+    .bot-header { background-color: ${config.design.primaryColor}; }
+  </style>
+</head>
+<body class="flex items-center justify-center h-screen p-4">
+  <div class="w-full max-w-md h-[600px] bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden border">
+    <div class="bot-header p-4 text-white flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center font-bold">
+        ${config.profile.name.charAt(0)}
+      </div>
+      <div>
+        <h3 class="font-bold">${config.profile.name}</h3>
+        <p class="text-xs opacity-90">${config.language.level} Level</p>
+      </div>
+    </div>
+    <div class="flex-1 p-4 overflow-y-auto" id="chat-box">
+      <div class="bg-gray-100 text-gray-800 p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[85%] mb-3">
+        Hello! Let's talk about ${config.language.topics}.
+      </div>
+    </div>
+    <div class="p-4 border-t flex gap-2">
+      <input type="text" id="user-input" class="flex-1 border rounded-full px-4 py-2" placeholder="Type here...">
+      <button onclick="sendMessage()" class="text-white px-4 py-2 rounded-full" style="background-color: ${config.design.primaryColor}">Send</button>
+    </div>
+  </div>
+  <script>
+    // Простая логика чата для экспортированного файла
+    function sendMessage() {
+      const input = document.getElementById('user-input');
+      const text = input.value;
+      if(!text) return;
+      
+      const box = document.getElementById('chat-box');
+      box.innerHTML += '<div class="bg-blue-100 text-blue-900 p-3 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] self-end ml-auto mb-3">' + text + '</div>';
+      input.value = '';
+      
+      setTimeout(() => {
+        box.innerHTML += '<div class="bg-gray-100 text-gray-800 p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[85%] mb-3">Please tell me more, or type "finish" to get results.</div>';
+        box.scrollTop = box.scrollHeight;
+      }, 1000);
+    }
+  <\/script>
+</body>
+</html>`;
+
+        const blob = new Blob([htmlContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${config.profile.name.replace(/\s+/g, '_')}_bot.html`;
+        a.click();
+      };
+
+      const handleCopyIframe = () => {
+        const iframe = `<iframe src="YOUR_HOSTED_HTML_LINK_HERE" width="100%" height="600px" style="border: none; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);" allow="microphone"></iframe>`;
+        navigator.clipboard.writeText(iframe);
+        alert('Код iframe для Genially скопирован! Не забудьте заменить ссылку на реальную, когда загрузите HTML на хостинг.');
+      };
+
+      return (
+        <div className="flex h-screen text-gray-800">
+          
+          {/* ЛЕВАЯ ПАНЕЛЬ: РЕДАКТОР */}
+          <aside className="w-1/2 flex flex-col border-r border-gray-200 bg-white">
+            <div className="p-6 border-b">
+              <h1 className="text-2xl font-bold text-gray-900">Редактор Бота-Экзаменатора</h1>
+              <p className="text-gray-500 text-sm mt-1">Настройте параметры и протестируйте в реальном времени</p>
+            </div>
+            
+            {/* Навигация */}
+            <div className="flex border-b px-6 pt-4 gap-4">
+              {['profile', 'language', 'design'].map(tab => (
+                <button 
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`pb-2 px-1 font-medium text-sm border-b-2 transition-colors ${
+                    activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {tab === 'profile' ? 'Профиль' : tab === 'language' ? 'Язык & NLP' : 'Дизайн'}
+                </button>
+              ))}
+            </div>
+
+            {/* Настройки */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              
+              {activeTab === 'profile' && (
+                <div className="space-y-4 animate-fadeIn">
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Имя бота</label>
+                    <input type="text" value={config.profile.name} onChange={e => updateConfig('profile', 'name', e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-200 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Возрастная аудитория</label>
+                    <select value={config.profile.age} onChange={e => updateConfig('profile', 'age', e.target.value)} className="w-full p-2 border rounded-lg">
+                      <option value="kids">Дети</option>
+                      <option value="teens">Подростки (ОГЭ/ЕГЭ)</option>
+                      <option value="adults">Взрослые</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Манера общения (Системный промпт)</label>
+                    <textarea value={config.profile.persona} onChange={e => updateConfig('profile', 'persona', e.target.value)} className="w-full p-2 border rounded-lg h-24 focus:ring-2 outline-none" placeholder="Как бот должен себя вести?"></textarea>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'language' && (
+                <div className="space-y-4 animate-fadeIn">
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Целевой уровень CEFR</label>
+                    <select value={config.language.level} onChange={e => updateConfig('language', 'level', e.target.value)} className="w-full p-2 border rounded-lg">
+                      {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(lvl => <option key={lvl} value={lvl}>{lvl}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Темы для проверки (через запятую)</label>
+                    <input type="text" value={config.language.topics} onChange={e => updateConfig('language', 'topics', e.target.value)} className="w-full p-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Стиль речи</label>
+                    <div className="flex gap-4 mt-2">
+                      <label className="flex items-center gap-2"><input type="radio" name="style" checked={config.language.style === 'formal'} onChange={() => updateConfig('language', 'style', 'formal')} /> Formal</label>
+                      <label className="flex items-center gap-2"><input type="radio" name="style" checked={config.language.style === 'informal'} onChange={() => updateConfig('language', 'style', 'informal')} /> Informal</label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'design' && (
+                <div className="space-y-4 animate-fadeIn">
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Основной цвет</label>
+                    <input type="color" value={config.design.primaryColor} onChange={e => updateConfig('design', 'primaryColor', e.target.value)} className="w-full h-12 rounded cursor-pointer" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Цвет фона приложения</label>
+                    <input type="color" value={config.design.bgColor} onChange={e => updateConfig('design', 'bgColor', e.target.value)} className="w-full h-12 rounded cursor-pointer" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Шрифт</label>
+                    <select value={config.design.fontFamily} onChange={e => updateConfig('design', 'fontFamily', e.target.value)} className="w-full p-2 border rounded-lg">
+                      <option value="sans-serif">Sans-Serif (Современный)</option>
+                      <option value="serif">Serif (Классический)</option>
+                      <option value="monospace">Monospace (Код)</option>
+                      <option value="'Comic Sans MS', cursive">Comic (Игровой)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Блок Экспорта */}
+            <div className="p-6 border-t bg-gray-50 flex gap-3 flex-wrap">
+              <button onClick={handleExportHTML} className="px-5 py-2.5 bg-gray-800 hover:bg-gray-900 text-white rounded-lg font-medium shadow-sm transition-colors flex-1">
+                Скачать HTML
+              </button>
+              <button onClick={handleCopyIframe} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-sm transition-colors flex-1">
+                Код Genially (iframe)
+              </button>
+            </div>
+          </aside>
+
+          {/* ПРАВАЯ ПАНЕЛЬ: ПРЕВЬЮ (ИНТЕРАКТИВНОЕ) */}
+          <main className="w-1/2 bg-gray-100 flex flex-col items-center justify-center p-8 relative" style={{ backgroundColor: config.design.bgColor }}>
+            
+            <div className="w-full max-w-md h-[700px] bg-white rounded-[2rem] shadow-2xl overflow-hidden flex flex-col border-[6px] border-white relative z-10" style={{ fontFamily: config.design.fontFamily }}>
+              <ChatPreview config={config} />
+            </div>
+
+          </main>
+        </div>
+      );
+    }
+
+    // --- КОМПОНЕНТ ПРЕВЬЮ ЧАТА И NLP ---
+    function ChatPreview({ config }) {
+      const [messages, setMessages] = useState([
+        { id: 1, sender: 'bot', text: `Hello! I am ${config.profile.name}. We are going to practice topics like: ${config.language.topics}. Type "finish" when you want to get your CEFR score.` }
+      ]);
+      const [inputValue, setInputValue] = useState('');
+      const [isTyping, setIsTyping] = useState(false);
+      const messagesEndRef = useRef(null);
+
+      // Авто-скролл вниз
+      useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, [messages, isTyping]);
+
+      // Движок Оценки (NLP)
+      const analyzeText = (userMessages) => {
+        // Объединяем все сообщения юзера
+        const fullText = userMessages.join(' ');
+        
+        // Используем compromise.js
+        const doc = window.nlp(fullText);
+        
+        const wordCount = doc.terms().length;
+        const sentences = doc.sentences().length;
+        const verbs = doc.verbs().length;
+        const adjectives = doc.adjectives().length;
+
+        // Имитация критериев ОГЭ/ЕГЭ
+        let commScore = wordCount > 20 ? 3 : (wordCount > 10 ? 2 : 1); // РКЗ
+        let gramScore = verbs > 3 ? 3 : (verbs > 1 ? 2 : 1); // Грамматика
+        let vocabScore = adjectives > 2 ? 3 : 1; // Лексика
+        
+        let total = commScore + gramScore + vocabScore;
+        
+        let cefr = total >= 8 ? config.language.level : (total >= 5 ? 'B1' : 'A2');
+        let badge = total >= 8 ? 'Brain Champion' : (total >= 5 ? 'Word Hunter' : 'Explorer');
+
+        return `Assessment Complete! \n\nCEFR Estimate: ${cefr}\nWords: ${wordCount}\nScore (OGE/EGE scale): ${total}/9\n\nBadge Unlocked: 🏆 ${badge}!\n\nKeep practicing!`;
+      };
+
+      const handleSend = () => {
+        if (!inputValue.trim()) return;
+        
+        const newUserMsg = { id: Date.now(), sender: 'user', text: inputValue };
+        const updatedMessages = [...messages, newUserMsg];
+        setMessages(updatedMessages);
+        setInputValue('');
+        setIsTyping(true);
+
+        // Имитация задержки печати
+        setTimeout(() => {
+          setIsTyping(false);
+          
+          if (newUserMsg.text.toLowerCase().includes('finish') || newUserMsg.text.toLowerCase().includes('завершить')) {
+            const userTexts = updatedMessages.filter(m => m.sender === 'user').map(m => m.text);
+            const feedback = analyzeText(userTexts);
+            setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: feedback }]);
+          } else {
+            setMessages(prev => [...prev, { id: Date.now() + 1, sender: 'bot', text: 'Interesting! Tell me more about that.' }]);
+          }
+        }, 1500); // 1.5 секунды думает
+      };
+
+      return (
+        <React.Fragment>
+          {/* Шапка чата */}
+          <div className="p-4 text-white flex items-center justify-between shadow-sm z-10 transition-colors" style={{ backgroundColor: config.design.primaryColor }}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center font-bold text-lg">
+                {config.profile.name.charAt(0)}
+              </div>
+              <div>
+                <h3 className="font-bold leading-tight">{config.profile.name}</h3>
+                <p className="text-xs opacity-90">{config.language.level} • {config.profile.age}</p>
+              </div>
+            </div>
+            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+          </div>
+
+          {/* Область сообщений */}
+          <div className="flex-1 p-4 bg-gray-50 flex flex-col gap-4 overflow-y-auto">
+            {messages.map(msg => (
+              <div key={msg.id} className={`max-w-[85%] p-3 rounded-2xl shadow-sm whitespace-pre-wrap ${
+                msg.sender === 'bot' 
+                  ? 'bg-white text-gray-800 rounded-tl-none self-start border border-gray-100' 
+                  : 'text-white rounded-tr-none self-end'
+              }`} style={msg.sender === 'user' ? { backgroundColor: config.design.primaryColor } : {}}>
+                {msg.text}
+              </div>
+            ))}
+            
+            {isTyping && (
+              <div className="bg-white text-gray-400 p-3 rounded-2xl rounded-tl-none self-start border border-gray-100 w-16 flex gap-1 justify-center items-center h-10 shadow-sm">
+                <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce"></div>
+                <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Ввод */}
+          <div className="p-4 bg-white border-t flex gap-2">
+            <input 
+              type="text" 
+              value={inputValue}
+              onChange={e => setInputValue(e.target.value)}
+              onKeyPress={e => e.key === 'Enter' && handleSend()}
+              placeholder="Type your answer..." 
+              className="flex-1 border rounded-full px-4 py-2 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-100 transition-shadow"
+            />
+            <button 
+              onClick={handleSend}
+              className="text-white px-5 py-2 rounded-full font-medium transition-transform hover:scale-105 active:scale-95 shadow-sm"
+              style={{ backgroundColor: config.design.primaryColor }}
+            >
+              ➔
+            </button>
+          </div>
+        </React.Fragment>
+      );
+    }
+
+    // Запуск приложения
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
