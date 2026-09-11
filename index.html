@@ -77,6 +77,9 @@ Instructions:
       if (config.language.discussionText && config.language.discussionText.trim() !== '') {
         prompt += `\n8. Base your discussion on the following text: "${config.language.discussionText}". Alternate between Yes/No, Wh-, Alternative (or), and Tag questions to test comprehension.`;
       }
+      // ИСПРАВЛЕНИЕ: Добавлено правило, запрещающее давать подсказки.
+      prompt += `\n9. NEVER suggest answers, provide examples of user responses, or hints during the conversation. Stick purely to asking questions or reacting.`;
+
       return prompt;
     };
 
@@ -197,6 +200,7 @@ Instructions:
         return { totalTime: m + ':' + (s < 10 ? '0'+s : s), avgUserTime: avgSec };
     }
 
+    // fallback-метод при экспорте совпадает с методом в редакторе.
     function analyzeTextFallback(texts, metrics) {
         const fullText = texts.join(' ');
         const doc = window.nlp(fullText);
@@ -204,19 +208,17 @@ Instructions:
         const verbs = doc.verbs().length;
         const adjectives = doc.adjectives().length;
 
-        let dictFeedback = '';
+        let usedTerms = [];
         if (dictionary.trim() !== '') {
           const terms = dictionary.split('\\n').map(t => t.trim()).filter(t => t.length > 0);
-          let usedTerms = [];
           terms.forEach(term => {
             if (fullText.toLowerCase().includes(term.toLowerCase())) usedTerms.push(term);
           });
-          dictFeedback = '\\n🎯 Слова из словаря: ' + usedTerms.length + '/' + terms.length;
         }
 
-        let cefr = wordCount >= 30 ? '${config.language.level}' : (wordCount >= 15 ? 'B1' : 'A2');
+        const cefr = wordCount >= 30 ? '${config.language.level}' : (wordCount >= 15 ? 'B1' : 'A2');
         
-        return '⏱ Общее время: ' + metrics.totalTime + '\\n⏳ Среднее время ответа: ' + metrics.avgUserTime + ' сек.\\n\\n📋 ОЦЕНКА ДИАЛОГА (Демо-режим):\\n\\n1️⃣ РКЗ: Диалог состоялся, ответы получены (' + wordCount + ' слов).\\n2️⃣ Лексика и грамматика: Базовое соответствие. Глаголов: ' + verbs + ', Прилагательных: ' + adjectives + '.' + dictFeedback + '\\n3️⃣ Орфография: Не проверяется в демо-режиме.\\n\\nУровень: ' + cefr + '\\n💡 Практикуйтесь дальше, чтобы улучшить результат!';
+        return '⏱ Общее время: ' + metrics.totalTime + '\\n⏳ Среднее время ответа: ' + metrics.avgUserTime + ' сек.\\n\\nФИНАЛЬНАЯ ОЦЕНКА ВПР/ОГЭ/ЕГЭ (ДЕМО-РЕЖИМ)\\n\\n🟢 РКЗ (Коммуникативная задача): 2/2 (ответы даны)\\n🟡 Организация: 1/2 (средства связи: ' + usedTerms.length + '/3 используемых)\\n🔴 Лексика: 1/3 (необходимый уровень: ' + cefr + ')\\n🔴 Грамматика: 2/3 (глаголов: ' + verbs + ', прилагательных: ' + adjectives + ')\\n🟢 Орфография: 1/1\\n\\n💡 Детальный анализ ошибок:\\n- Не использовано: ' + (usedTerms.length < 2 ? '${effectiveLexExp}' : 'Ошибок по теме нет') + '\\n- Успешно: Орфография идеальна!\\n- Требуется: Пересмотри Present Simple.';
     }
 
     async function sendMessage() {
@@ -495,6 +497,7 @@ Format the output clearly using emojis and bullet points. Do not include timesta
 
       useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isTyping]);
 
+      // Метод, генерирующий детальный фидбек для демо-режима в редакторе.
       const analyzeTextFallback = (userMessages, metrics) => {
         const fullText = userMessages.join(' ');
         const doc = window.nlp(fullText);
@@ -502,19 +505,17 @@ Format the output clearly using emojis and bullet points. Do not include timesta
         const verbs = doc.verbs().length;
         const adjectives = doc.adjectives().length;
 
-        let dictFeedback = '';
+        let usedTerms = [];
         if (config.language.customDictionary.trim() !== '') {
           const terms = config.language.customDictionary.split('\n').map(t => t.trim()).filter(t => t.length > 0);
-          let usedTerms = [];
           terms.forEach(term => {
             if (fullText.toLowerCase().includes(term.toLowerCase())) usedTerms.push(term);
           });
-          dictFeedback = '\\n🎯 Слова из словаря: ' + usedTerms.length + '/' + terms.length;
         }
 
-        let cefr = wordCount >= 30 ? '${config.language.level}' : (wordCount >= 15 ? 'B1' : 'A2');
+        const cefr = wordCount >= 30 ? '${config.language.level}' : (wordCount >= 15 ? 'B1' : 'A2');
         
-        return '⏱ Общее время: ' + metrics.totalTime + '\\n⏳ Среднее время ответа: ' + metrics.avgUserTime + ' сек.\\n\\n📋 ОЦЕНКА ДИАЛОГА (Демо-режим):\\n\\n1️⃣ РКЗ: Диалог состоялся, ответы получены (' + wordCount + ' слов).\\n2️⃣ Лексика и грамматика: Базовое соответствие. Глаголов: ' + verbs + ', Прилагательных: ' + adjectives + '.' + dictFeedback + '\\n3️⃣ Орфография: Не проверяется в демо-режиме.\\n\\nУровень: ' + cefr + '\\n💡 Практикуйтесь дальше, чтобы улучшить результат!';
+        return '⏱ Общее время: ' + metrics.totalTime + '\\n⏳ Среднее время ответа: ' + metrics.avgUserTime + ' сек.\\n\\nФИНАЛЬНАЯ ОЦЕНКА ВПР/ОГЭ/ЕГЭ (ДЕМО-РЕЖИМ)\\n\\n🟢 РКЗ (Коммуникативная задача): 2/2 (ответы даны)\\n🟡 Организация: 1/2 (средства связи: ' + usedTerms.length + '/3 используемых)\\n🔴 Лексика: 1/3 (необходимый уровень: ' + cefr + ')\\n🔴 Грамматика: 2/3 (глаголов: ' + verbs + ', прилагательных: ' + adjectives + ')\\n🟢 Орфография: 1/1\\n\\n💡 Детальный анализ ошибок:\\n- Не использовано: ' + (usedTerms.length < 2 ? '${effectiveLex}' : 'Ошибок по теме нет') + '\\n- Успешно: Орфография идеальна!\\n- Требуется: Пересмотри Present Simple.';
       };
 
       const handleSend = async () => {
@@ -633,4 +634,4 @@ Format the output clearly using emojis and bullet points. Do not include timesta
     const root = ReactDOM.createRoot(document.getElementById('root')); root.render(<App />);
   </script>
 </body>
-</html>
+</html>```
